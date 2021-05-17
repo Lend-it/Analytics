@@ -4,3 +4,5 @@ urllib3
 matplotlib
 seaborn
 jupyter
+metaflow
+requests
