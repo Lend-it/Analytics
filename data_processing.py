@@ -6,6 +6,7 @@ from metaflow import (
 import pandas as pd
 import requests
 
+from collections import defaultdict
 
 def metric_per_file(json):
 
@@ -143,7 +144,6 @@ class DataProcessing(FlowSpec):
 
     @step
     def start(self):
-        from collections import defaultdict
         import re
 
         services_tmp = defaultdict(lambda: defaultdict(dict))
@@ -171,6 +171,62 @@ class DataProcessing(FlowSpec):
             services_tmp[service_name] = tmp_dict
 
         self.services_metrics = dict(services_tmp)
+
+        self.next(self.split_issues_by_release)
+
+    @step
+    def split_issues_by_release(self):
+        from dateutil.parser import parse
+
+        issues = []
+
+        query_params = {
+            'per_page': '100',
+            'page': 1,
+            'state': 'all',
+            'direction': 'asc'
+        }
+
+        while True:
+            response = requests.get(
+            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params).json()
+
+            if len(response) == 0:
+                break
+
+            issues_tmp = [content for content in response if 'pull_request' not in content.keys() ]
+
+            issues.extend(issues_tmp)
+            query_params['page'] += 1
+
+        query_params = {
+            'per_page': '100',
+            'page': 1,
+            'direction': 'asc'
+        }
+
+        response = requests.get(
+            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/releases', params=query_params).json()
+
+        self.releases = sorted(response, key=lambda item: item['published_at'])
+
+        issues_per_release = defaultdict(list, {key['name']:[] for key in self.releases})
+        idx = 0
+
+        for issue in issues:
+            if parse(issue['created_at']) > parse(self.releases[idx]['published_at']):
+                idx += 1
+
+            try:
+                if parse(issue['created_at']) <= parse(self.releases[idx]['published_at']):
+                    issues_per_release[self.releases[idx]['name']].append(issue)
+            except:
+                break
+
+        self.issues_per_release = dict(issues_per_release)
+
+        #Remove first release as it's not part of Analytics evaluation
+        self.issues_per_release.pop('Primeira Release - v1.0')
 
         self.next(self.create_dataframe)
 
