@@ -365,6 +365,30 @@ class DataProcessing(FlowSpec):
             self.metrics_dfs[service_name]['metrics'] = service_df
             self.metrics_dfs[service_name]['m8'] = m8_service_df
 
+        self.next(self.calculate_descriptive_statistics)
+
+    @step
+    def calculate_descriptive_statistics(self):
+
+        for service_name, dfs in self.metrics_dfs.items():
+            descriptive_df = pd.DataFrame(
+                columns=['m1', 'm2', 'm3', 'm7', 'm9'])
+
+            descriptive_df.loc['mean'] = self.metrics_dfs[service_name]['metrics'].mean(
+            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['mode'] = self.metrics_dfs[service_name]['metrics'].mode(
+            ).max().drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['standart_deviation'] = self.metrics_dfs[service_name]['metrics'].std(
+            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['variance'] = self.metrics_dfs[service_name]['metrics'].var(
+            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['min'] = self.metrics_dfs[service_name]['metrics'].min().drop(
+                ['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['max'] = self.metrics_dfs[service_name]['metrics'].max().drop(
+                ['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+
+            self.metrics_dfs[service_name]['descriptive'] = descriptive_df
+
         self.next(self.end)
 
     @step
