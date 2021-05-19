@@ -339,6 +339,8 @@ class DataProcessing(FlowSpec):
                     metrics['m1'], metrics['m2'], metrics['m3'])
                 metrics['asc2'] = (metrics['m7'] + metrics['m8']['percentage'].mean()
                                    + metrics['m9'])/3
+                metrics['ac2'] = (metrics['m7'] + metrics['m9'])/2
+                metrics['totalAC2'] = metrics['ac2']
                 metrics['ncloc'] = int(base_component_df[base_component_df['metric']
                                                          == 'ncloc']['value'].values[0])
 
