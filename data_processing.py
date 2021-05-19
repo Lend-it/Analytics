@@ -215,7 +215,7 @@ class DataProcessing(FlowSpec):
         self.releases.pop(0)
 
         issues_per_release = defaultdict(
-            list, {key['name'].lower(): [] for key in self.releases})
+            list, {key['name'].split()[0].lower(): [] for key in self.releases})
         idx = 0
 
         for issue in issues:
@@ -225,7 +225,7 @@ class DataProcessing(FlowSpec):
             try:
                 if parse(issue['created_at']) <= parse(self.releases[idx]['published_at']):
                     issues_per_release[self.releases[idx]
-                                       ['name']].append(issue)
+                                       ['name'].split()[0].lower()].append(issue)
             except:
                 break
 
@@ -271,7 +271,7 @@ class DataProcessing(FlowSpec):
             self.issues_metrics[release_name] = {
                 'issues_resolved': closed_issues,
                 'issues_total': total_issues,
-                'labels_count': dict(issues_labels)
+                'labels': dict(issues_labels)
             }
 
         self.next(self.create_dataframe)
@@ -327,9 +327,9 @@ class DataProcessing(FlowSpec):
                 metrics['m3'] = m3(content['files_df'])
                 metrics['m7'] = m7(self.issues_metrics[release_name]['issues_resolved'],
                                    self.issues_metrics[release_name]['issues_total'])
-                metrics['m8'] = m8(self.issues_metrics[release_name]['tags'],
+                metrics['m8'] = m8(self.issues_metrics[release_name]['labels'],
                                    self.issues_metrics[release_name]['issues_total'])
-                metrics['m9'] = m9(self.issues_metrics[release_name]['tags'],
+                metrics['m9'] = m9(self.issues_metrics[release_name]['labels'],
                                    self.issues_metrics[release_name]['issues_total'])
                 metrics['asc1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
@@ -337,6 +337,8 @@ class DataProcessing(FlowSpec):
                     metrics['m1'], metrics['m2'], metrics['m3'])
                 metrics['totalAC1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
+                metrics['asc2'] = (metrics['m7'] + metrics['m8']['percentage'].mean()
+                                   + metrics['m9'])/3
                 metrics['ncloc'] = int(base_component_df[base_component_df['metric']
                                                          == 'ncloc']['value'].values[0])
 
@@ -346,7 +348,7 @@ class DataProcessing(FlowSpec):
 
         self.next(self.end)
 
-    @ step
+    @step
     def end(self):
         pass
 
