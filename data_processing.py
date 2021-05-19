@@ -8,6 +8,7 @@ import requests
 
 from collections import defaultdict
 
+
 def metric_per_file(json):
 
     file_json = []
@@ -189,12 +190,13 @@ class DataProcessing(FlowSpec):
 
         while True:
             response = requests.get(
-            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params).json()
+                'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params).json()
 
             if len(response) == 0:
                 break
 
-            issues_tmp = [content for content in response if 'pull_request' not in content.keys() ]
+            issues_tmp = [
+                content for content in response if 'pull_request' not in content.keys()]
 
             issues.extend(issues_tmp)
             query_params['page'] += 1
@@ -210,7 +212,10 @@ class DataProcessing(FlowSpec):
 
         self.releases = sorted(response, key=lambda item: item['published_at'])
 
-        issues_per_release = defaultdict(list, {key['name']:[] for key in self.releases})
+        self.releases.pop(0)
+
+        issues_per_release = defaultdict(
+            list, {key['name'].lower(): [] for key in self.releases})
         idx = 0
 
         for issue in issues:
@@ -219,14 +224,55 @@ class DataProcessing(FlowSpec):
 
             try:
                 if parse(issue['created_at']) <= parse(self.releases[idx]['published_at']):
-                    issues_per_release[self.releases[idx]['name']].append(issue)
+                    issues_per_release[self.releases[idx]
+                                       ['name']].append(issue)
             except:
                 break
 
         self.issues_per_release = dict(issues_per_release)
 
-        #Remove first release as it's not part of Analytics evaluation
-        self.issues_per_release.pop('Primeira Release - v1.0')
+        self.next(self.process_issue_data)
+
+    @step
+    def process_issue_data(self):
+
+        self.issues_metrics = {}
+
+        interest_labels = [
+            "HOTFIX",
+            "DOCS",
+            "FEATURE",
+            "ARQ",
+            "DEVOPS",
+            "ANALYTICS",
+            "US",
+            "EASY",
+            "MEDIUM",
+            "HARD",
+            "EPS",
+            "MDS"
+        ]
+        closed_issues = 0
+        total_issues = 0
+        issues_labels = defaultdict(int)
+
+        for release_name, issues in self.issues_per_release.items():
+
+            for issue in issues:
+                if issue['state'] == 'closed':
+                    closed_issues += 1
+
+                for label in issue['labels']:
+                    if label['name'] in interest_labels:
+                        issues_labels[label['name']] += 1
+
+            total_issues += len(issues)
+
+            self.issues_metrics[release_name] = {
+                'issues_resolved': closed_issues,
+                'issues_total': total_issues,
+                'labels_count': dict(issues_labels)
+            }
 
         self.next(self.create_dataframe)
 
@@ -279,6 +325,12 @@ class DataProcessing(FlowSpec):
                 metrics['m1'] = m1(content['files_df'])
                 metrics['m2'] = m2(content['files_df'])
                 metrics['m3'] = m3(content['files_df'])
+                metrics['m7'] = m7(self.issues_metrics[release_name]['issues_resolved'],
+                                   self.issues_metrics[release_name]['issues_total'])
+                metrics['m8'] = m8(self.issues_metrics[release_name]['tags'],
+                                   self.issues_metrics[release_name]['issues_total'])
+                metrics['m9'] = m9(self.issues_metrics[release_name]['tags'],
+                                   self.issues_metrics[release_name]['issues_total'])
                 metrics['asc1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
                 metrics['ac1'] = asc1(
