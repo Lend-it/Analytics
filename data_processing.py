@@ -308,7 +308,6 @@ class DataProcessing(FlowSpec):
                                                'm2',
                                                'm3',
                                                'm7',
-                                               'm8',
                                                'm9',
                                                'asc1',
                                                'ac1',
@@ -317,6 +316,18 @@ class DataProcessing(FlowSpec):
                                                'totalAC1',
                                                'totalAC2',
                                                'ncloc'])
+            m8_service_df = pd.DataFrame(columns=['hotfix',
+                                                  'docs',
+                                                  'feature',
+                                                  'arq',
+                                                  'devops',
+                                                  'analytics',
+                                                  'us',
+                                                  'easy',
+                                                  'medium',
+                                                  'hard',
+                                                  'eps',
+                                                  'mds'])
 
             for release_name, content in releases.items():
                 metrics = {}
@@ -344,9 +355,15 @@ class DataProcessing(FlowSpec):
                 metrics['ncloc'] = int(base_component_df[base_component_df['metric']
                                                          == 'ncloc']['value'].values[0])
 
+                m8_service_df.loc[release_name] = {
+                    item[0]: item[1] for item in metrics['m8'].to_dict('split')['data']}
+                metrics.pop('m8')
+
                 service_df.loc[release_name] = metrics
 
-            self.metrics_dfs[service_name] = service_df
+            self.metrics_dfs[service_name] = {}
+            self.metrics_dfs[service_name]['metrics'] = service_df
+            self.metrics_dfs[service_name]['m8'] = m8_service_df
 
         self.next(self.end)
 
