@@ -3,9 +3,12 @@ from metaflow import (
     step,
     Parameter)
 
+import re
+import json
 import pandas as pd
 import requests
 
+from dateutil.parser import parse
 from collections import defaultdict
 
 
@@ -36,7 +39,6 @@ def generate_file_dataframe(metric_list, json, language_extension):
     df = df.rename({'index': 'path'}, axis=1).drop(['files'], axis=1)
 
     return df
-
 
 def m1(df):
 
@@ -116,6 +118,8 @@ def asc1(m1, m2, m3):
     asc1_result = ((m1 * pm1) + (m2 * pm2) + (m3 * pm3)) * psc1
     return asc1_result
 
+headers = {'Authorization': 'token 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'}
+
 
 class DataProcessing(FlowSpec):
     metrics_list = Parameter(
@@ -145,22 +149,21 @@ class DataProcessing(FlowSpec):
 
     @step
     def start(self):
-        import re
 
         services_tmp = defaultdict(lambda: defaultdict(dict))
 
         releases_folder = requests.get(
-            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/contents/analytics-raw-data').json()
+            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/contents/analytics-raw-data', headers=headers).json()
 
         for release in releases_folder:
-            folders_json = requests.get(release['url']).json()
+            folders_json = requests.get(release['url'], headers=headers).json()
 
             for json_file in folders_json:
                 service_name = re.search(
                     r'(\w+)-\d{2}-\d{2}-\d{4}\.json', json_file['name'])[1]
 
                 services_tmp[service_name][release['name'].lower()]['json'] = requests.get(
-                    json_file['download_url']).json()
+                    json_file['download_url'], headers=headers).json()
 
         for service_name, releases in services_tmp.items():
             tmp_dict = {}
@@ -177,7 +180,6 @@ class DataProcessing(FlowSpec):
 
     @step
     def split_issues_by_release(self):
-        from dateutil.parser import parse
 
         issues = []
 
@@ -190,7 +192,7 @@ class DataProcessing(FlowSpec):
 
         while True:
             response = requests.get(
-                'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params).json()
+                'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params, headers=headers).json()
 
             if len(response) == 0:
                 break
@@ -201,35 +203,21 @@ class DataProcessing(FlowSpec):
             issues.extend(issues_tmp)
             query_params['page'] += 1
 
-        query_params = {
-            'per_page': '100',
-            'page': 1,
-            'direction': 'asc'
-        }
+        with open('sprints_definition.json') as file:
+            self.sprints = json.load(file)
 
-        response = requests.get(
-            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/releases', params=query_params).json()
-
-        self.releases = sorted(response, key=lambda item: item['published_at'])
-
-        self.releases.pop(0)
-
-        issues_per_release = defaultdict(
-            list, {key['name'].split()[0].lower(): [] for key in self.releases})
+        issues_per_sprint = defaultdict(list)
         idx = 0
 
-        for issue in issues:
-            if parse(issue['created_at']) > parse(self.releases[idx]['published_at']):
-                idx += 1
+        for sprint, sprint_limits in self.sprints.items():
+            while True:
+                if idx >= len(issues) or parse(issues[idx]['created_at']).isoformat() > parse(sprint_limits['end']).isoformat():
+                    break
 
-            try:
-                if parse(issue['created_at']) <= parse(self.releases[idx]['published_at']):
-                    issues_per_release[self.releases[idx]
-                                       ['name'].split()[0].lower()].append(issue)
-            except:
-                break
+                issues_per_sprint[sprint].append(issues[idx])
+                idx += 1 
 
-        self.issues_per_release = dict(issues_per_release)
+        self.issues_per_sprints = dict(issues_per_sprint)
 
         self.next(self.process_issue_data)
 
@@ -252,11 +240,11 @@ class DataProcessing(FlowSpec):
             "EPS",
             "MDS"
         ]
-        closed_issues = 0
-        total_issues = 0
-        issues_labels = defaultdict(int)
-
-        for release_name, issues in self.issues_per_release.items():
+        
+        for sprint, issues in self.issues_per_sprints.items():
+            closed_issues = 0
+            total_issues = 0
+            issues_labels = defaultdict(int, {key: 0 for key in interest_labels})
 
             for issue in issues:
                 if issue['state'] == 'closed':
@@ -268,7 +256,7 @@ class DataProcessing(FlowSpec):
 
             total_issues += len(issues)
 
-            self.issues_metrics[release_name] = {
+            self.issues_metrics[sprint] = {
                 'issues_resolved': closed_issues,
                 'issues_total': total_issues,
                 'labels': dict(issues_labels)
@@ -301,33 +289,16 @@ class DataProcessing(FlowSpec):
 
     @step
     def create_service_metrics_df(self):
-        self.metrics_dfs = {}
+        self.product_metrics_df = {}
 
         for service_name, releases in self.services_metrics.items():
             service_df = pd.DataFrame(columns=['m1',
                                                'm2',
                                                'm3',
-                                               'm7',
-                                               'm9',
                                                'asc1',
                                                'ac1',
-                                               'asc2',
-                                               'ac2',
                                                'totalAC1',
-                                               'totalAC2',
                                                'ncloc'])
-            m8_service_df = pd.DataFrame(columns=['hotfix',
-                                                  'docs',
-                                                  'feature',
-                                                  'arq',
-                                                  'devops',
-                                                  'analytics',
-                                                  'us',
-                                                  'easy',
-                                                  'medium',
-                                                  'hard',
-                                                  'eps',
-                                                  'mds'])
 
             for release_name, content in releases.items():
                 metrics = {}
@@ -336,61 +307,127 @@ class DataProcessing(FlowSpec):
                 metrics['m1'] = m1(content['files_df'])
                 metrics['m2'] = m2(content['files_df'])
                 metrics['m3'] = m3(content['files_df'])
-                metrics['m7'] = m7(self.issues_metrics[release_name]['issues_resolved'],
-                                   self.issues_metrics[release_name]['issues_total'])
-                metrics['m8'] = m8(self.issues_metrics[release_name]['labels'],
-                                   self.issues_metrics[release_name]['issues_total'])
-                metrics['m9'] = m9(self.issues_metrics[release_name]['labels'],
-                                   self.issues_metrics[release_name]['issues_total'])
                 metrics['asc1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
                 metrics['ac1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
                 metrics['totalAC1'] = asc1(
                     metrics['m1'], metrics['m2'], metrics['m3'])
-                metrics['asc2'] = (metrics['m7'] + metrics['m8']['percentage'].mean()
-                                   + metrics['m9'])/3
-                metrics['ac2'] = (metrics['m7'] + metrics['m9'])/2
-                metrics['totalAC2'] = metrics['ac2']
                 metrics['ncloc'] = int(base_component_df[base_component_df['metric']
                                                          == 'ncloc']['value'].values[0])
 
-                m8_service_df.loc[release_name] = {
-                    item[0]: item[1] for item in metrics['m8'].to_dict('split')['data']}
-                metrics.pop('m8')
-
                 service_df.loc[release_name] = metrics
 
-            self.metrics_dfs[service_name] = {}
-            self.metrics_dfs[service_name]['metrics'] = service_df
-            self.metrics_dfs[service_name]['m8'] = m8_service_df
+            self.product_metrics_df[service_name] = {}
+            self.product_metrics_df[service_name]['metrics'] = service_df
 
-        self.next(self.calculate_descriptive_statistics)
+        self.next(self.create_sprint_issues_dataframe)
 
     @step
-    def calculate_descriptive_statistics(self):
+    def create_sprint_issues_dataframe(self):
 
-        for service_name, dfs in self.metrics_dfs.items():
+        self.project_metrics_df = {}
+
+        self.project_metrics_df['metrics'] = pd.DataFrame(
+            columns=['data_inicio', 'data_fim', 'm7', 'm9', 'asc2', 'totalAC2', 'no_sprint'])
+
+        self.project_metrics_df['m8'] = pd.DataFrame(columns=['hotfix',
+                                                                    'docs',
+                                                                    'feature',
+                                                                    'arq',
+                                                                    'devops',
+                                                                    'analytics',
+                                                                    'us',
+                                                                    'easy',
+                                                                    'medium',
+                                                                    'hard',
+                                                                    'eps',
+                                                                    'mds'])
+
+
+
+        for sprint, sprint_metrics in self.issues_metrics.items():
+            metrics = {}
+
+            metrics['data_inicio'] = parse(self.sprints[sprint]['start']).strftime('%d/%m/%Y')
+            metrics['data_fim'] = parse(self.sprints[sprint]['end']).strftime('%d/%m/%Y')
+            metrics['m7'] = m7(sprint_metrics['issues_resolved'],
+                               sprint_metrics['issues_total'])
+            metrics['m8'] = m8(sprint_metrics['labels'],
+                               sprint_metrics['issues_total'])
+            metrics['m9'] = m9(sprint_metrics['labels'],
+                               sprint_metrics['issues_total'])
+            metrics['asc2'] = (metrics['m7'] + metrics['m8']['percentage'].mean()
+                               + metrics['m9'])/3
+            metrics['totalAC2'] = (metrics['m7'] + metrics['m9'])/2
+            metrics['no_sprint'] = re.search(r'\d+', sprint)[0]
+
+            self.project_metrics_df['m8'].loc[sprint] = {
+                item[0]: item[1] for item in metrics['m8'].to_dict('split')['data']}
+
+            self.project_metrics_df['metrics'].loc[sprint] = metrics
+
+        self.next(self.calculate_product_descriptive_statistics)
+
+
+    @step
+    def calculate_product_descriptive_statistics(self):
+
+        for service_name, dfs in self.product_metrics_df.items():
             descriptive_df = pd.DataFrame(
-                columns=['m1', 'm2', 'm3', 'm7', 'm9'])
+                columns=['m1', 'm2', 'm3'])
 
-            descriptive_df.loc['mean'] = self.metrics_dfs[service_name]['metrics'].mean(
-            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
-            descriptive_df.loc['mode'] = self.metrics_dfs[service_name]['metrics'].mode(
-            ).max().drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
-            descriptive_df.loc['standart_deviation'] = self.metrics_dfs[service_name]['metrics'].std(
-            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
-            descriptive_df.loc['variance'] = self.metrics_dfs[service_name]['metrics'].var(
-            ).drop(['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
-            descriptive_df.loc['min'] = self.metrics_dfs[service_name]['metrics'].min().drop(
-                ['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
-            descriptive_df.loc['max'] = self.metrics_dfs[service_name]['metrics'].max().drop(
-                ['asc1', 'ac1', 'asc2', 'ac2', 'totalAC1', 'totalAC2', 'ncloc'])
+            descriptive_df.loc['mean'] = self.product_metrics_df[service_name]['metrics'].mean(
+            ).drop(['asc1', 'ac1', 'totalAC1', 'ncloc'])
+            descriptive_df.loc['mode'] = self.product_metrics_df[service_name]['metrics'].mode(
+            ).max().drop(['asc1', 'ac1', 'totalAC1', 'ncloc'])
+            descriptive_df.loc['25%'] = self.product_metrics_df[service_name]['metrics'].quantile(
+                0.25).drop(['asc1', 'ac1', 'totalAC1'])
+            descriptive_df.loc['50%'] = self.product_metrics_df[service_name]['metrics'].quantile(
+                0.5).drop(['asc1', 'ac1', 'totalAC1'])
+            descriptive_df.loc['75%'] = self.product_metrics_df[service_name]['metrics'].quantile(
+                0.75).drop(['asc1', 'ac1', 'totalAC1'])
+            descriptive_df.loc['standart_deviation'] = self.product_metrics_df[service_name]['metrics'].std(
+            ).drop(['asc1', 'ac1', 'totalAC1', 'ncloc'])
+            descriptive_df.loc['variance'] = self.product_metrics_df[service_name]['metrics'].var(
+            ).drop(['asc1', 'ac1', 'totalAC1', 'ncloc'])
+            descriptive_df.loc['min'] = self.product_metrics_df[service_name]['metrics'].min().drop(
+                ['asc1', 'ac1', 'totalAC1', 'ncloc'])
+            descriptive_df.loc['max'] = self.product_metrics_df[service_name]['metrics'].max().drop(
+                ['asc1', 'ac1', 'totalAC1', 'ncloc'])
 
-            self.metrics_dfs[service_name]['descriptive'] = descriptive_df
+            self.product_metrics_df[service_name]['descriptive'] = descriptive_df
+
+        self.next(self.calculate_project_descriptive_statistics)
+    
+    @step
+    def calculate_project_descriptive_statistics(self):
+
+        descriptive_df = pd.DataFrame(columns=['m7', 'm9'])
+
+        descriptive_df.loc['mean'] = self.project_metrics_df['metrics'].mean(
+        ).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['mode'] = self.project_metrics_df['metrics'].mode(
+        ).max().drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['25%'] = self.project_metrics_df['metrics'].quantile(
+            0.25).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['50%'] = self.project_metrics_df['metrics'].quantile(
+            0.5).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['75%'] = self.project_metrics_df['metrics'].quantile(
+            0.75).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['standart_deviation'] = self.project_metrics_df['metrics'].std(
+        ).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['variance'] = self.project_metrics_df['metrics'].var(
+        ).drop(['asc2', 'totalAC2'])
+        descriptive_df.loc['min'] = self.project_metrics_df['metrics'].min().drop(
+            ['asc2', 'totalAC2'])
+        descriptive_df.loc['max'] = self.project_metrics_df['metrics'].max().drop(
+            ['asc2', 'totalAC2'])
+
+        self.project_metrics_df['descriptive'] = descriptive_df
 
         self.next(self.end)
-
+        
     @step
     def end(self):
         pass
