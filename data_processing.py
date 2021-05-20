@@ -40,6 +40,7 @@ def generate_file_dataframe(metric_list, json, language_extension):
 
     return df
 
+
 def m1(df):
 
     density_non_complex_files = len(
@@ -118,8 +119,6 @@ def asc1(m1, m2, m3):
     asc1_result = ((m1 * pm1) + (m2 * pm2) + (m3 * pm3)) * psc1
     return asc1_result
 
-headers = {'Authorization': 'token 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'}
-
 
 class DataProcessing(FlowSpec):
     metrics_list = Parameter(
@@ -153,17 +152,17 @@ class DataProcessing(FlowSpec):
         services_tmp = defaultdict(lambda: defaultdict(dict))
 
         releases_folder = requests.get(
-            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/contents/analytics-raw-data', headers=headers).json()
+            'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/contents/analytics-raw-data').json()
 
         for release in releases_folder:
-            folders_json = requests.get(release['url'], headers=headers).json()
+            folders_json = requests.get(release['url']).json()
 
             for json_file in folders_json:
                 service_name = re.search(
                     r'(\w+)-\d{2}-\d{2}-\d{4}\.json', json_file['name'])[1]
 
                 services_tmp[service_name][release['name'].lower()]['json'] = requests.get(
-                    json_file['download_url'], headers=headers).json()
+                    json_file['download_url']).json()
 
         for service_name, releases in services_tmp.items():
             tmp_dict = {}
@@ -192,7 +191,7 @@ class DataProcessing(FlowSpec):
 
         while True:
             response = requests.get(
-                'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params, headers=headers).json()
+                'https://api.github.com/repos/fga-eps-mds/2020.2-Lend.it/issues', params=query_params).json()
 
             if len(response) == 0:
                 break
@@ -215,7 +214,7 @@ class DataProcessing(FlowSpec):
                     break
 
                 issues_per_sprint[sprint].append(issues[idx])
-                idx += 1 
+                idx += 1
 
         self.issues_per_sprints = dict(issues_per_sprint)
 
@@ -240,11 +239,12 @@ class DataProcessing(FlowSpec):
             "EPS",
             "MDS"
         ]
-        
+
         for sprint, issues in self.issues_per_sprints.items():
             closed_issues = 0
             total_issues = 0
-            issues_labels = defaultdict(int, {key: 0 for key in interest_labels})
+            issues_labels = defaultdict(
+                int, {key: 0 for key in interest_labels})
 
             for issue in issues:
                 if issue['state'] == 'closed':
@@ -332,25 +332,25 @@ class DataProcessing(FlowSpec):
             columns=['data_inicio', 'data_fim', 'm7', 'm9', 'asc2', 'totalAC2', 'no_sprint'])
 
         self.project_metrics_df['m8'] = pd.DataFrame(columns=['hotfix',
-                                                                    'docs',
-                                                                    'feature',
-                                                                    'arq',
-                                                                    'devops',
-                                                                    'analytics',
-                                                                    'us',
-                                                                    'easy',
-                                                                    'medium',
-                                                                    'hard',
-                                                                    'eps',
-                                                                    'mds'])
-
-
+                                                              'docs',
+                                                              'feature',
+                                                              'arq',
+                                                              'devops',
+                                                              'analytics',
+                                                              'us',
+                                                              'easy',
+                                                              'medium',
+                                                              'hard',
+                                                              'eps',
+                                                              'mds'])
 
         for sprint, sprint_metrics in self.issues_metrics.items():
             metrics = {}
 
-            metrics['data_inicio'] = parse(self.sprints[sprint]['start']).strftime('%d/%m/%Y')
-            metrics['data_fim'] = parse(self.sprints[sprint]['end']).strftime('%d/%m/%Y')
+            metrics['data_inicio'] = parse(
+                self.sprints[sprint]['start']).strftime('%d/%m/%Y')
+            metrics['data_fim'] = parse(
+                self.sprints[sprint]['end']).strftime('%d/%m/%Y')
             metrics['m7'] = m7(sprint_metrics['issues_resolved'],
                                sprint_metrics['issues_total'])
             metrics['m8'] = m8(sprint_metrics['labels'],
@@ -368,7 +368,6 @@ class DataProcessing(FlowSpec):
             self.project_metrics_df['metrics'].loc[sprint] = metrics
 
         self.next(self.calculate_product_descriptive_statistics)
-
 
     @step
     def calculate_product_descriptive_statistics(self):
@@ -399,7 +398,7 @@ class DataProcessing(FlowSpec):
             self.product_metrics_df[service_name]['descriptive'] = descriptive_df
 
         self.next(self.calculate_project_descriptive_statistics)
-    
+
     @step
     def calculate_project_descriptive_statistics(self):
 
@@ -427,7 +426,7 @@ class DataProcessing(FlowSpec):
         self.project_metrics_df['descriptive'] = descriptive_df
 
         self.next(self.end)
-        
+
     @step
     def end(self):
         pass
